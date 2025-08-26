@@ -125,13 +125,13 @@ def create_slideshow(folder_path):
     slideshow.write_videofile(
         output_video_path,
         fps=24,
-        codec="h264_videotoolbox",      # or "hevc_videotoolbox"
+        codec="libx264",           # Windows-compatible codec
         audio_codec="aac",
-        preset="veryfast",              # still accepted by VideoToolbox
+        preset="veryfast",
         ffmpeg_params=[
-        "-pix_fmt", "yuv420p",      # required for wide compatibility
-        "-b:v", "3M"                # target video bitrate (adjust)
-    ]
+            "-pix_fmt", "yuv420p",  # required for wide compatibility
+            "-b:v", "3M"            # target video bitrate (adjust)
+        ]
     )
 
     print(f"✅ Slideshow created: {output_video_path}")

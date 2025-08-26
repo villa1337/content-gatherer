@@ -99,6 +99,8 @@ def fetch_and_download_images(words):
     download_images(image_urls)
     return image_urls
 
+import time
+
 def fetch_urls(words):
     """
     Fetch image URLs for a list of keywords.
@@ -125,6 +127,9 @@ def fetch_urls(words):
                 image_urls.extend(urls)
             else:
                 print(f"⚠️  No images found for keyword: {word}")
+            
+            # Add delay between searches to avoid rate limiting
+            time.sleep(2)
         except Exception as e:
             print(f"❌ Error fetching images for keyword '{word}': {str(e)}")
     
