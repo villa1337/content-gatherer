@@ -7,13 +7,32 @@ import groq_query
 import news_extract
 import image_fetch
 
+def sanitize_filename(url):
+    """Convert a URL into a safe filename."""
+    parsed = urlparse(url)
+    domain = parsed.netloc.replace('www.', '')
+    path = parsed.path.strip('/')
+    
+    # Clean up the path
+    if path:
+        path_parts = path.split('/')
+        name = path_parts[-1] if path_parts[-1] else path_parts[-2]
+    else:
+        name = domain
+    
+    # Remove file extensions
+    name = re.sub(r'\.(html|htm|php|asp|aspx)$', '', name)
+    
+    # Replace invalid characters
+    return re.sub(r'[^\w\-_.]', '_', name)
+
 def create_json_from_url(url, output_folder="output"):
     """
     Extract information from a URL and save it as a JSON file.
     
     Args:
         url (str): The URL to process
-        output_folder (str): The folder to save JSON files (default: "json_outputs")
+        output_folder (str): The folder to save JSON files (default: "output")
     
     Returns:
         dict: The extracted data that was saved to JSON
@@ -40,9 +59,18 @@ def create_json_from_url(url, output_folder="output"):
         print("Generating YouTube description...")
         youtube_description = groq_query.get_youtube_description(content)
         
-        # Fetch related image URLs
-        print("Fetching related image URLs...")
-        image_urls = image_fetch.fetch_urls(key_words)
+        # Generate filename for the article
+        filename = sanitize_filename(url)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        article_name = f"{filename}_{timestamp}"
+        
+        # Create folder for this article's files
+        article_folder = os.path.join(output_folder, article_name)
+        os.makedirs(article_folder, exist_ok=True)
+        
+        # Fetch related image URLs and download images
+        print("Fetching and downloading related images...")
+        image_urls, image_paths = image_fetch.fetch_and_download_images(key_words, article_folder)
 
         # Create the data structure
         data = {
@@ -53,30 +81,20 @@ def create_json_from_url(url, output_folder="output"):
             "youtube_title": youtube_title,
             "youtube_description": youtube_description,
             "image_urls": image_urls,
+            "image_paths": image_paths,  # Add downloaded image paths
             "authors": content["authors"],
             "publish_date": str(content["publish_date"]) if content["publish_date"] else None,
             "extracted_at": datetime.now().isoformat(),
             "text_preview": content["text"][:500] + "..." if len(content["text"]) > 500 else content["text"]
         }
         
-        # Generate filename from URL
-        filename = generate_filename_from_url(url)
-        
-        # Create nested folder structure: output/<folder_name>/<json_file>
-        folder_path = os.path.join(output_folder, filename)
-        os.makedirs(folder_path, exist_ok=True)
-        
-        filepath = os.path.join(folder_path, f"{filename}.json")
-        
-        # Download images
-        image_fetch.download_images(image_urls, folder_path)
-        
-        # Save to JSON file
+        # Save JSON file in the article folder
+        filepath = os.path.join(article_folder, f"{article_name}.json")
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         
         print(f"✅ JSON file saved: {filepath}")
-        return folder_path, summary
+        return article_folder, summary
         
     except Exception as e:
         print(f"❌ Error processing URL {url}: {str(e)}")
@@ -134,10 +152,23 @@ def batch_process_urls(urls, output_folder="output"):
     for i, url in enumerate(urls, 1):
         print(f"\n--- Processing URL {i}/{len(urls)} ---")
         try:
-            result = create_json_from_url(url, output_folder)
-            results.append({"url": url, "status": "success", "data": result})
+            article_folder, summary = create_json_from_url(url, output_folder)
+            results.append({
+                "url": url,
+                "status": "success",
+                "folder": article_folder,
+                "summary": summary
+            })
+            print(f"📁 Output folder: {article_folder}")
+            print(f"📝 Summary: {summary}")
         except Exception as e:
-            print(f"Failed to process {url}: {str(e)}")
-            results.append({"url": url, "status": "error", "error": str(e)})
+            error_msg = str(e)
+            print(f"❌ Failed to process {url}: {error_msg}")
+            results.append({
+                "url": url,
+                "status": "error",
+                "error": error_msg
+            })
     
+    return results
     return results

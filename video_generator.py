@@ -30,14 +30,11 @@ def resize_and_pad(img, target_size=(1080, 1920), background_color=(0, 0, 0)):
     background.paste(resized_img, (paste_x, paste_y))
     return background
 
-def create_slideshow(folder_path):
+def create_slideshow(folder_path, custom_thumbnail_path=None):
     audio_path = os.path.join(folder_path, "summary_audio.mp3")
     output_video_path = os.path.join(folder_path, "summary_video.mp4")
 
-    # Ask if user wants to use a custom thumbnail
-    use_custom_thumbnail = input("\nDo you want to use a custom thumbnail? (y/n): ").strip().lower() == 'y'
-    custom_thumbnail_path = os.path.join(folder_path, "thumbnail.jpg")
-    
+    use_custom_thumbnail = custom_thumbnail_path is not None
     if use_custom_thumbnail and not os.path.exists(custom_thumbnail_path):
         print(f"⚠️  Custom thumbnail not found at {custom_thumbnail_path}. Proceeding without it.")
         use_custom_thumbnail = False

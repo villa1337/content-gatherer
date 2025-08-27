@@ -3,8 +3,14 @@ import time
 import requests
 import json
 import ast
+from dotenv import load_dotenv
 
-groq_api_key = os.getenv("GROQ_API_KEY", "")
+# Load environment variables from .env file
+load_dotenv()
+
+groq_api_key = os.getenv("GROQ_API_KEY")
+if not groq_api_key:
+    raise ValueError("GROQ_API_KEY environment variable is not set. Please add it to your .env file.")
 
 def query_groq(prompt: str, model="llama3-70b-8192") -> str:
     headers = {

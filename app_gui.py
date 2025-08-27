@@ -1,12 +1,16 @@
 import sys
 import os
+import json
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLabel, QLineEdit, QTextEdit, QPushButton,
                             QRadioButton, QButtonGroup, QFileDialog, QCheckBox,
-                            QProgressBar, QMessageBox)
+                            QProgressBar, QMessageBox, QDialog)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QClipboard
 import file_to_json
 import url_to_json
+import text_to_speech
+import video_generator
 
 class ContentWorker(QThread):
     finished = pyqtSignal(str)
@@ -32,25 +36,33 @@ class ContentWorker(QThread):
                 
                 self.status_update.emit("Creating input file...")
                 with open(temp_file, "w", encoding="utf-8") as f:
-                    f.write(self.content)
+                    f.write(self.title + "\n\n" + self.content)
                 
                 self.progress.emit("Processing text input...")
                 self.status_update.emit("Generating content from text...")
-                output_folder = file_to_json.process_file(temp_file, self.title)
+                output_folder, summary = file_to_json.create_json_from_file(temp_file)
             else:
                 self.progress.emit("Processing URL...")
                 self.status_update.emit("Fetching content from URL...")
-                output_folder = url_to_json.process_url(self.url, self.title)
+                output_folder, summary = url_to_json.create_json_from_url(self.url)
             
             self.status_update.emit(f"✅ Content generated successfully!")
             self.status_update.emit(f"📁 Output folder: {output_folder}")
+            self.status_update.emit(f"📝 Summary: {summary}")
             
             # If images were found, show count
-            image_folder = os.path.join(output_folder)
-            if os.path.exists(image_folder):
-                image_count = len([f for f in os.listdir(image_folder) 
+            if os.path.exists(output_folder):
+                image_count = len([f for f in os.listdir(output_folder) 
                                  if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
                 self.status_update.emit(f"🖼️ Images downloaded: {image_count}")
+            
+            # Generate audio and video
+            self.status_update.emit("Generating audio...")
+            audio_path = os.path.join(output_folder, "summary_audio.mp3")
+            text_to_speech.tts_elevenlabs(summary, audio_path, "sk_85fee4f798f30152c13019e802dc41aa9b38407bdb6d32ac")
+            
+            self.status_update.emit("Generating video slideshow...")
+            video_generator.create_slideshow(output_folder, self.custom_thumbnail)
 
             self.finished.emit(output_folder)
         except Exception as e:
@@ -62,13 +74,15 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Content Gatherer")
-        self.setup_ui()
         
-        # Add status text area
+        # Initialize status text area first
         self.status_area = QTextEdit()
         self.status_area.setReadOnly(True)
         self.status_area.setMinimumHeight(100)
         self.status_area.setPlaceholderText("Status updates will appear here...")
+        
+        # Then setup the rest of the UI
+        self.setup_ui()
 
     def setup_ui(self):
         # Main widget and layout
@@ -186,6 +200,11 @@ class MainWindow(QMainWindow):
     def generate_content(self):
         input_type = "text" if self.text_radio.isChecked() else "url"
         
+        # Initialize variables
+        title = ""
+        content = ""
+        url = ""
+        
         if input_type == "text":
             title = self.title_input.text().strip()
             content = self.content_input.toPlainText().strip()
@@ -196,8 +215,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Error", "Please enter content")
                 return
         else:  # URL mode
-            title = ""  # Will be extracted from the URL content
-            content = ""
             url = self.url_input.text().strip()
             if not url:
                 QMessageBox.warning(self, "Error", "Please enter URL")
@@ -230,6 +247,24 @@ class MainWindow(QMainWindow):
     def on_generation_complete(self, output_folder):
         self.generate_button.setEnabled(True)
         self.progress_bar.hide()
+
+        # Get the JSON file path
+        json_files = [f for f in os.listdir(output_folder) if f.endswith('.json')]
+        if json_files:
+            json_path = os.path.join(output_folder, json_files[0])
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.loads(f.read())
+                    # Show YouTube info dialog
+                    dialog = YouTubeInfoDialog(
+                        title=data['youtube_title'],
+                        description=data['youtube_description'],
+                        parent=self
+                    )
+                    dialog.exec()
+            except Exception as e:
+                self.add_status(f"⚠️ Could not load YouTube info: {str(e)}")
+
         QMessageBox.information(self, "Success", f"Content generated successfully!\nOutput folder: {output_folder}")
 
     def on_progress_update(self, message):
@@ -246,6 +281,54 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
         self.add_status(f"❌ Error: {error_message}")
         QMessageBox.critical(self, "Error", f"An error occurred:\n{error_message}")
+
+class YouTubeInfoDialog(QDialog):
+    def __init__(self, title, description, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("YouTube Information")
+        self.setup_ui(title, description)
+
+    def setup_ui(self, title, description):
+        layout = QVBoxLayout(self)
+
+        # Title section
+        title_label = QLabel("YouTube Title:")
+        layout.addWidget(title_label)
+        
+        title_layout = QHBoxLayout()
+        self.title_field = QLineEdit(title)
+        self.title_field.setReadOnly(True)
+        title_layout.addWidget(self.title_field)
+        
+        copy_title_btn = QPushButton("Copy")
+        copy_title_btn.clicked.connect(lambda: self.copy_to_clipboard(title))
+        title_layout.addWidget(copy_title_btn)
+        layout.addLayout(title_layout)
+
+        # Description section
+        desc_label = QLabel("YouTube Description:")
+        layout.addWidget(desc_label)
+        
+        self.desc_field = QTextEdit()
+        self.desc_field.setPlainText(description)
+        self.desc_field.setReadOnly(True)
+        layout.addWidget(self.desc_field)
+        
+        copy_desc_btn = QPushButton("Copy Description")
+        copy_desc_btn.clicked.connect(lambda: self.copy_to_clipboard(description))
+        layout.addWidget(copy_desc_btn)
+
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+
+        self.setMinimumWidth(500)
+        self.setMinimumHeight(300)
+
+    def copy_to_clipboard(self, text):
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

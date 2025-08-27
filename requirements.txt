@@ -5,3 +5,5 @@ ddgs
 typing_extensions
 moviepy
 pillow
+python-dotenv
+beautifulsoup4
